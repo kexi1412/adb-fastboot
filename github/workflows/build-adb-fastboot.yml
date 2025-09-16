@@ -1,34 +1,35 @@
 name: Build Android ADB & Fastboot
 
 on:
+  # 允许手动触发此工作流
   workflow_dispatch:
 
 jobs:
   build:
+    # 在 Ubuntu 虚拟机上运行
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Repository
+      - name: 检查代码
         uses: actions/checkout@v4
 
-      - name: Set up build environment
+      - name: 安装构建依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y git-lfs python3 bc ccache make openjdk-11-jdk-headless
 
-      - name: Install repo tool
+      - name: 安装 repo 工具
         run: |
           mkdir -p ~/.bin
           PATH=~/.bin:$PATH
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          curl https://storage.g.cn/git-repo-downloads/repo > ~/.bin/repo
           chmod a+x ~/.bin/repo
 
-      - name: Initialize & Sync Android Source
+      - name: 初始化并同步 Android 源代码
         run: |
           mkdir aosp
           cd aosp
           # 初始化 repo 工具，使用一个较新的 Android 版本分支
-          # --depth=1 减少下载量，-c 只获取当前分支
           repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r1 --depth=1
           
           # 同步所需项目，只下载 adb、fastboot 及其构建系统依赖
@@ -41,26 +42,26 @@ jobs:
             platform/prebuilts/misc/linux-x86/libselinux \
             platform/prebuilts/build-tools
 
-      - name: Set up Android build
+      - name: 设置 Android 构建环境
         run: |
           cd aosp
           source build/envsetup.sh
-          # 设置 ARM64 目标架构
+          # 设置 ARM64 目标架构，以匹配大多数 Android 手机
           lunch aosp_arm64-userdebug
           
-      - name: Compile ADB and Fastboot
+      - name: 编译 ADB 和 Fastboot
         run: |
           cd aosp
           # 使用 make 命令编译 adb 和 fastboot
-          # -j$(nproc) 使用所有可用CPU核心，加快编译速度
           make adb fastboot -j$(nproc)
           
-      - name: List compiled files
+      - name: 列出编译好的文件
         run: |
           ls -lh aosp/out/target/product/generic/system/bin/adb
           ls -lh aosp/out/target/product/generic/system/bin/fastboot
       
-      - name: Upload compiled artifacts
+      - name: 上传编译好的文件
+        # 此处使用最新的 v4 版本，解决了之前的报错
         uses: actions/upload-artifact@v4
         with:
           name: adb-fastboot-android-arm64
