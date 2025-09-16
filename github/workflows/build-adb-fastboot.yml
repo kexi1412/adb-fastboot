@@ -1,36 +1,67 @@
-# This is a basic workflow to help you get started with Actions
+name: Build Android ADB & Fastboot
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Set up build environment
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          sudo apt-get update
+          sudo apt-get install -y git-lfs python3 bc ccache make openjdk-11-jdk-headless
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/.bin
+          PATH=~/.bin:$PATH
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+
+      - name: Initialize & Sync Android Source
+        run: |
+          mkdir aosp
+          cd aosp
+          # 初始化 repo 工具，使用一个较新的 Android 版本分支
+          # --depth=1 减少下载量，-c 只获取当前分支
+          repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r1 --depth=1
+          
+          # 同步所需项目，只下载 adb、fastboot 及其构建系统依赖
+          repo sync -c -j$(nproc) \
+            platform/build \
+            platform/system/core \
+            platform/system/adb \
+            platform/prebuilts/clang/host/linux-x86 \
+            platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            platform/prebuilts/misc/linux-x86/libselinux \
+            platform/prebuilts/build-tools
+
+      - name: Set up Android build
+        run: |
+          cd aosp
+          source build/envsetup.sh
+          # 设置 ARM64 目标架构
+          lunch aosp_arm64-userdebug
+          
+      - name: Compile ADB and Fastboot
+        run: |
+          cd aosp
+          # 使用 make 命令编译 adb 和 fastboot
+          # -j$(nproc) 使用所有可用CPU核心，加快编译速度
+          make adb fastboot -j$(nproc)
+          
+      - name: List compiled files
+        run: |
+          ls -lh aosp/out/target/product/generic/system/bin/adb
+          ls -lh aosp/out/target/product/generic/system/bin/fastboot
+      
+      - name: Upload compiled artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: adb-fastboot-android-arm64
+          path: aosp/out/target/product/generic/system/bin/
